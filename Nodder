@@ -1,0 +1,278 @@
+import pandas as pd
+import platform
+import subprocess
+import matplotlib.pyplot as plt
+from tkinter import Tk, Button, Label, Entry, filedialog, messagebox, Checkbutton, IntVar, Menu, Text, Scrollbar, END
+import re
+import os
+
+"""
+The purpose of this software is to analyze facial expressions and nodding.
+"""
+
+class NodderNoddingAnalyzer:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Nodder Nodding Analyzer")
+
+        # Create the menu bar
+        self.menu_bar = Menu(root)
+        root.config(menu=self.menu_bar)
+
+        # Add the "File" menu
+        self.file_menu = Menu(self.menu_bar, tearoff=0)
+        self.file_menu.add_command(label="Exit", command=root.quit)
+        self.menu_bar.add_cascade(label="File", menu=self.file_menu)
+
+        # Add the "Help" menu
+        self.help_menu = Menu(self.menu_bar, tearoff=0)
+        self.help_menu.add_command(label="Documentation", command=self.show_documentation)
+        self.help_menu.add_command(label="About", command=self.show_about)
+        self.menu_bar.add_cascade(label="Help", menu=self.help_menu)
+
+        # Labels
+        self.label = Label(root, text="Select one or two OpenFace CSV files to begin:")
+        self.label.pack(pady=10)
+
+        # Checkbox to select single file mode
+        self.single_file_var = IntVar()
+        self.single_file_check = Checkbutton(root, text="Single File Mode", variable=self.single_file_var)
+        self.single_file_check.pack(pady=5)
+
+        # Buttons
+        self.select_button = Button(root, text="Select Files", command=self.select_files)
+        self.select_button.pack(pady=5)
+
+        self.time_frame_label = Label(root, text="Enter Time Frame (start, end):")
+        self.time_frame_label.pack(pady=5)
+        
+        self.start_time_entry = Entry(root)
+        self.start_time_entry.pack(pady=5)
+        self.end_time_entry = Entry(root)
+        self.end_time_entry.pack(pady=5)
+
+        self.max_timeframe_label = Label(root, text="")
+        self.max_timeframe_label.pack(pady=5)
+
+        self.column_selection_label = Label(root, text="Select Columns to Plot:")
+        self.column_selection_label.pack(pady=10)
+
+        # Checkboxes for column selection
+        self.pose_Rx_var = IntVar()
+        self.pose_Ry_var = IntVar()
+        self.pose_Rz_var = IntVar()
+        self.gaze_angle_x_var = IntVar()
+        self.gaze_angle_y_var = IntVar()
+
+        self.pose_Rx_check = Checkbutton(root, text="pose_Rx", variable=self.pose_Rx_var)
+        self.pose_Rx_check.pack()
+        self.pose_Ry_check = Checkbutton(root, text="pose_Ry", variable=self.pose_Ry_var)
+        self.pose_Ry_check.pack()
+        self.pose_Rz_check = Checkbutton(root, text="pose_Rz", variable=self.pose_Rz_var)
+        self.pose_Rz_check.pack()
+        self.gaze_angle_x_check = Checkbutton(root, text="gaze_angle_x", variable=self.gaze_angle_x_var)
+        self.gaze_angle_x_check.pack()
+        self.gaze_angle_y_check = Checkbutton(root, text="gaze_angle_y", variable=self.gaze_angle_y_var)
+        self.gaze_angle_y_check.pack()
+
+        self.generate_plot_button = Button(root, text="Generate Plot", command=self.generate_plot, state="disabled")
+        self.generate_plot_button.pack(pady=5)
+
+        # Video loaded label and play button
+        self.video_loaded_label = Label(root, text="")
+        self.video_loaded_label.pack(pady=5)
+        self.play_video_button = Button(root, text="Play Video", command=self.play_video, state="disabled")
+        self.play_video_button.pack(pady=5)
+
+        # Output text area
+        self.output_text = Text(root, wrap='word', height=10)
+        self.output_text.pack(pady=10, fill='x')
+        self.output_scroll = Scrollbar(root, command=self.output_text.yview)
+        self.output_text.configure(yscrollcommand=self.output_scroll.set)
+        self.output_scroll.pack(side='right', fill='y')
+
+        self.data1 = None
+        self.data2 = None
+        self.mp4_path = None
+
+    def select_files(self):
+        pattern = (
+            r"(D\d+F-[0-4]_(getting_acquainted|culture_cutbacks|school_discipline|cat_dog|video_games)_\d{2}\.csv)"
+            r"|"
+            r"(D\d{2}F-\d_(\d{2}[A-Z]{1,2}_\d{2}[A-Z]{1,2})_\d\.csv)"
+        )
+
+        file_paths = filedialog.askopenfilenames(title="Select the OpenFace CSV files", filetypes=[("CSV files", "*.csv")])
+        if self.single_file_var.get():
+            if len(file_paths) != 1:
+                messagebox.showerror("Error", "Please select exactly one file.")
+                return
+        else:
+            if len(file_paths) != 2:
+                messagebox.showerror("Error", "Please select exactly two files.")
+                return
+
+            # Validate file names against the pattern
+            for file_path in file_paths:
+                if not re.match(pattern, os.path.basename(file_path)):
+                    messagebox.showerror("Error", f"File {os.path.basename(file_path)} does not match the required pattern.")
+                    return
+
+        try:
+            self.data1 = pd.read_csv(file_paths[0])
+            self.data1.columns = self.data1.columns.str.strip()
+            if 'timestamp' not in self.data1.columns:
+                messagebox.showerror("Error", f"File {os.path.basename(file_paths[0])} does not contain a 'timestamp' column.")
+                return
+
+            self.output_text.insert(END, f"CSV file 1 loaded: {os.path.basename(file_paths[0])}\n")
+            self.output_text.see(END)
+
+            if not self.single_file_var.get():
+                self.data2 = pd.read_csv(file_paths[1])
+                self.data2.columns = self.data2.columns.str.strip()
+                if 'timestamp' not in self.data2.columns:
+                    messagebox.showerror("Error", f"File {os.path.basename(file_paths[1])} does not contain a 'timestamp' column.")
+                    return
+
+                self.output_text.insert(END, f"CSV file 2 loaded: {os.path.basename(file_paths[1])}\n")
+                self.output_text.see(END)
+
+                # Normalize timestamps so they start from 0
+                self.data1['timestamp'] = self.data1['timestamp'] - self.data1['timestamp'].min()
+                self.data2['timestamp'] = self.data2['timestamp'] - self.data2['timestamp'].min()
+
+                # Determine labels based on face_id
+                self.label1 = "Person Right"
+                self.label2 = "Person Left"
+
+                # Update max timeframe label
+                min_time = min(self.data1['timestamp'].min(), self.data2['timestamp'].min())
+                max_time = max(self.data1['timestamp'].max(), self.data2['timestamp'].max())
+                self.max_timeframe_label.config(text=f"Max possible timeframe: {min_time} to {max_time}")
+            else:
+                self.output_text.insert(END, "No CSV file 2 loaded.\n")
+                self.output_text.see(END)
+                # Normalize timestamps so they start from 0
+                self.data1['timestamp'] = self.data1['timestamp'] - self.data1['timestamp'].min()
+                self.label1 = "Person"
+
+                # Update max timeframe label
+                min_time = self.data1['timestamp'].min()
+                max_time = self.data1['timestamp'].max()
+                self.max_timeframe_label.config(text=f"Max possible timeframe: {min_time} to {max_time}")
+
+            # Check for corresponding MP4 file
+            base_name = os.path.basename(file_paths[0])
+            mp4_pattern = re.sub(r'_\d{2}\.csv', '.mp4', base_name)
+            folder_path = os.path.dirname(file_paths[0])
+            self.mp4_path = os.path.join(folder_path, mp4_pattern)
+            if os.path.exists(self.mp4_path):
+                self.play_video_button.config(state="normal")
+                self.output_text.insert(END, f"Video loaded: {os.path.basename(self.mp4_path)}\n")
+                self.output_text.see(END)
+            else:
+                self.video_loaded_label.config(text="No matching MP4 file found.")
+                self.play_video_button.config(state="disabled")
+
+            # Enable buttons
+            self.generate_plot_button.config(state="normal")
+        
+        except FileNotFoundError as e:
+            messagebox.showerror("Error", f"File not found: {e.filename}")
+        except pd.errors.EmptyDataError as e:
+            messagebox.showerror("Error", f"File is empty: {e.filename}")
+        except pd.errors.ParserError as e:
+            messagebox.showerror("Error", f"Error parsing file: {e}")
+
+    def play_video(self):
+        if self.mp4_path:
+            try:
+                if platform.system() == 'Windows':
+                    subprocess.run(['start', '', self.mp4_path], check=True, shell=True)
+                elif platform.system() == 'Darwin':  # macOS
+                    subprocess.run(['open', self.mp4_path], check=True)
+                elif platform.system() == 'Linux':
+                    subprocess.run(['xdg-open', self.mp4_path], check=True)
+                else:
+                    messagebox.showerror("Error", "Unsupported operating system.")
+            except subprocess.CalledProcessError as e:
+                messagebox.showerror("Error", f"Failed to play MP4 file: {e}")
+
+    def get_selected_columns(self):
+        selected_columns = []
+        if self.pose_Rx_var.get():
+            selected_columns.append("pose_Rx")
+        if self.pose_Ry_var.get():
+            selected_columns.append("pose_Ry")
+        if self.pose_Rz_var.get():
+            selected_columns.append("pose_Rz")
+        if self.gaze_angle_x_var.get():
+            selected_columns.append("gaze_angle_x")
+        if self.gaze_angle_y_var.get():
+            selected_columns.append("gaze_angle_y")
+        return selected_columns
+
+    def generate_plot(self):
+        start_time = self.start_time_entry.get()
+        end_time = self.end_time_entry.get()
+        if not start_time or not end_time:
+            messagebox.showerror("Error", "Please enter a valid time frame.")
+            return
+
+        try:
+            start_time = float(start_time)
+            end_time = float(end_time)
+        except ValueError:
+            messagebox.showerror("Error", "Please enter numeric values for the time frame.")
+            return
+
+        selected_columns = self.get_selected_columns()
+        if not selected_columns:
+            messagebox.showerror("Error", "Please select at least one column to plot.")
+            return
+
+        filtered_data1 = self.data1[(self.data1['timestamp'] >= start_time) & (self.data1['timestamp'] <= end_time) & (self.data1['confidence'] >= 0.90)]
+        
+        if self.single_file_var.get():
+            if filtered_data1.empty:
+                messagebox.showerror("Error", "No data points within the specified time frame and confidence level.")
+                return
+
+            plt.figure(figsize=(15, 8))
+            for col in selected_columns:
+                if col in filtered_data1.columns:
+                    plt.plot(filtered_data1['timestamp'], filtered_data1[col], label=f'{self.label1} {col}')
+            plt.xlabel('Timestamp')
+            plt.ylabel('Values')
+            plt.title(f'Plot Over Time (Confidence >= 0.90)')
+            plt.legend()
+            plt.show()
+        else:
+            filtered_data2 = self.data2[(self.data2['timestamp'] >= start_time) & (self.data2['timestamp'] <= end_time) & (self.data2['confidence'] >= 0.90)]
+
+            if filtered_data1.empty or filtered_data2.empty:
+                messagebox.showerror("Error", "No data points within the specified time frame and confidence level.")
+                return
+
+            plt.figure(figsize=(15, 8))
+            for col in selected_columns:
+                if col in filtered_data1.columns and col in filtered_data2.columns:
+                    plt.plot(filtered_data1['timestamp'], filtered_data1[col], label=f'{self.label1} {col}', linestyle='--')
+                    plt.plot(filtered_data2['timestamp'], filtered_data2[col], label=f'{self.label2} {col}')
+            plt.xlabel('Timestamp')
+            plt.ylabel('Values')
+            plt.title(f'Plot Over Time (Confidence >= 0.90)')
+            plt.legend()
+            plt.show()
+
+    def show_documentation(self):
+        messagebox.showinfo("Documentation", "Contents will be added later.")
+
+    def show_about(self):
+        messagebox.showinfo("About", "Contents will be added later.")
+
+if __name__ == "__main__":
+    root = Tk()
+    app = NodderNoddingAnalyzer(root)
+    root.mainloop()
